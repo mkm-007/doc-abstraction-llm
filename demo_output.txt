@@ -1,0 +1,5 @@
+Query: What is the annual leave entitlement?
+Top chunk: 1. Annual Leave
+Employees receive 20 days of annual leave per calendar year.
+Unused leave may carry over up to 5 days. ...
+Abstract: Based on the document: 1. Annual Leave Employees receive 20 days of annual leave per calendar year. Unused leave may carry over up to 5 days.
