@@ -1,33 +1,44 @@
-from __future__ import annotations
-
+"""Source-attributed extractive retrieval. No live LLM or Chroma dependency."""
 from pathlib import Path
-
+from hashlib import sha256
+from dataclasses import asdict
 from doc_abstraction.chunking import schematic_chunk
 from doc_abstraction.store import LocalVectorStore
 
-STORE = LocalVectorStore()
+class DocumentIndex:
+    def __init__(self):
+        self.store = LocalVectorStore()
 
+    def ingest(self, path):
+        path = Path(path).resolve()
+        if path.stat().st_size > 1_000_000:
+            raise ValueError('Documents must be <= 1 MB')
+        text = path.read_text(encoding='utf-8')
+        # Full path internally prevents identical filenames overwriting one another.
+        chunks = schematic_chunk(text, str(path))
+        self.store.replace_document(str(path), chunks)
+        return len(chunks)
 
-def llm_abstract(question: str, context: str) -> str:
-    """Placeholder LLM — replace with LangChain + real model in extensions."""
-    snippet = context.replace("\n", " ")[:220]
-    return f"Based on the document: {snippet}"
+    def answer(self, question, k=2):
+        if not isinstance(question, str) or not question.strip() or len(question) > 1000:
+            raise ValueError('Question must contain 1-1000 characters')
+        hits = self.store.query(question, k)
+        citations = []
+        for h in hits:
+            citation = asdict(h)
+            citation['source'] = Path(h.doc_id).name
+            citation['source_id'] = sha256(h.doc_id.encode()).hexdigest()[:12]
+            # Local filesystem paths are not included in returned citations.
+            citation.pop('doc_id')
+            citation['chunk_id'] = citation['source_id'] + '#' + h.chunk_id.rsplit('#', 1)[1]
+            citations.append(citation)
+        return {'query': question, 'mode': 'extractive', 'status': 'ok' if hits else 'no_context',
+                'top_chunk': hits[0].text if hits else '',
+                'abstract': '\n\n'.join(f'[{i}] {h.text}' for i, h in enumerate(hits, 1)) if hits else 'No relevant context',
+                'hit_count': len(hits), 'citations': citations}
 
-
-def ingest_document(path: Path) -> int:
-    text = path.read_text(encoding="utf-8")
-    chunks = schematic_chunk(text, doc_id=path.stem)
-    for c in chunks:
-        STORE.add(c.section, c.text)
-    return len(chunks)
-
-
-def abstract_document(question: str) -> dict:
-    hits = STORE.query(question, k=2)
-    top = hits[0].text if hits else ""
-    return {
-        "query": question,
-        "top_chunk": top,
-        "abstract": llm_abstract(question, top) if top else "No relevant context",
-        "hit_count": len(hits),
-    }
+_DEFAULT = DocumentIndex()
+def ingest_document(path):
+    return _DEFAULT.ingest(path)
+def abstract_document(question):
+    return _DEFAULT.answer(question)
